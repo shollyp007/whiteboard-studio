@@ -820,9 +820,9 @@ function onDown(e) {
   startX = pos.x; startY = pos.y;
   lastX = pos.x; lastY = pos.y;
   points = [{x:pos.x,y:pos.y}];
-  isDrawing = true;
   if (tool === 'fill') { floodFill(Math.round(pos.x), Math.round(pos.y)); return; }
   if (tool === 'text') { addText(pos.x, pos.y); return; }
+  isDrawing = true;
   ctx.save();
   ctx.globalAlpha = opacity;
   if (tool === 'eraser') { ctx.globalCompositeOperation = 'destination-out'; }
@@ -1045,16 +1045,20 @@ document.getElementById('textInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitText(); }
 });
 document.getElementById('textInput').addEventListener('blur', () => {
-  // small delay so click-on-canvas doesn't race
   setTimeout(() => {
-    if (document.getElementById('textOverlay').style.display !== 'none') commitText();
-  }, 120);
+    const overlay = document.getElementById('textOverlay');
+    if (overlay.style.display !== 'none' && !overlay._committing) commitText();
+  }, 150);
 });
 
 function commitText() {
+  const overlay = document.getElementById('textOverlay');
+  if (overlay._committing) return;
+  overlay._committing = true;
   const input = document.getElementById('textInput');
   const txt = input.value.trim();
   closeTextOverlay();
+  overlay._committing = false;
   if (!txt) return;
   ctx.save();
   ctx.globalAlpha = opacity;
