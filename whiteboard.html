@@ -358,26 +358,35 @@
     }
     #fontSizeInput:focus { border-color: var(--accent); }
 
-    /* ── IN-CANVAS TEXT OVERLAY ── */
+    /* ── TEXT OVERLAY (fixed so overflow:hidden can't clip it) ── */
     #textOverlay {
-      display: none; position: absolute; z-index: 20;
+      display: none; position: fixed; z-index: 1000;
       pointer-events: all;
+      filter: drop-shadow(0 4px 16px rgba(0,0,0,0.4));
     }
     #textInput {
-      background: rgba(255,255,255,0.07);
-      border: 2px dashed var(--accent);
-      border-radius: 6px;
-      color: inherit;
-      outline: none; resize: none;
-      padding: 4px 6px;
-      min-width: 120px; min-height: 40px;
-      backdrop-filter: blur(4px);
-      line-height: 1.3;
+      display: block;
+      background: rgba(20,20,35,0.88);
+      border: 2px solid var(--accent);
+      border-radius: 8px;
+      color: #fff;
+      outline: none; resize: both;
+      padding: 6px 10px;
+      min-width: 140px; min-height: 44px;
+      backdrop-filter: blur(8px);
+      line-height: 1.4;
+      caret-color: var(--accent);
+    }
+    .light-mode #textInput {
+      background: rgba(255,255,255,0.92);
+      color: #1a1a2e;
     }
     .text-overlay-hint {
-      font-size: 10px; color: var(--text-muted);
-      margin-top: 4px; text-align: center;
+      font-size: 10px; color: rgba(255,255,255,0.55);
+      margin-top: 5px; text-align: center;
+      font-family: -apple-system, sans-serif;
     }
+    .light-mode .text-overlay-hint { color: var(--text-muted); }
 
     /* ── PROJECTS MODAL ── */
     #projectsModal {
@@ -579,11 +588,6 @@
     <canvas id="cursorCanvas"></canvas>
     <div id="zoomBadge">100%</div>
     <div id="autosaveBadge">✓ Auto-saved</div>
-    <!-- In-canvas text editor -->
-    <div id="textOverlay">
-      <textarea id="textInput" rows="1" placeholder="Type here…"></textarea>
-      <div class="text-overlay-hint">Enter to commit · Esc to cancel</div>
-    </div>
   </div>
 
   <!-- RIGHT PANEL -->
@@ -703,6 +707,12 @@
     </div>
 
   </div>
+</div>
+
+<!-- Text overlay — fixed so overflow:hidden on canvasArea can't clip it -->
+<div id="textOverlay">
+  <textarea id="textInput" rows="2" placeholder="Type here…"></textarea>
+  <div class="text-overlay-hint">Enter = commit &nbsp;·&nbsp; Shift+Enter = new line &nbsp;·&nbsp; Esc = cancel</div>
 </div>
 
 <!-- Hidden file input -->
@@ -1015,50 +1025,48 @@ let textOverlayX = 0, textOverlayY = 0;
 
 function addText(x, y) {
   const overlay = document.getElementById('textOverlay');
-  const input = document.getElementById('textInput');
-  const canvasRect = canvas.getBoundingClientRect();
-  const area = document.getElementById('canvasArea');
-  const areaRect = area.getBoundingClientRect();
+  const input   = document.getElementById('textInput');
 
-  // Position overlay at click point in the canvasArea coordinate space
   textOverlayX = x;
   textOverlayY = y;
-  const screenX = canvasRect.left - areaRect.left + x * zoom;
-  const screenY = canvasRect.top  - areaRect.top  + y * zoom;
 
-  overlay.style.left = screenX + 'px';
-  overlay.style.top  = screenY + 'px';
+  // Use fixed screen coordinates from the canvas bounding rect
+  const canvasRect = canvas.getBoundingClientRect();
+  const screenX = canvasRect.left + x * zoom;
+  const screenY = canvasRect.top  + y * zoom;
+
+  // Keep overlay inside viewport
+  const vpW = window.innerWidth, vpH = window.innerHeight;
+  overlay.style.left = Math.min(screenX, vpW - 260) + 'px';
+  overlay.style.top  = Math.min(screenY, vpH - 120) + 'px';
   overlay.style.display = 'block';
 
-  const fStyle = `${fontItalic?'italic':'normal'} ${fontBold?'bold':'normal'} ${fontSize*zoom}px "${selectedFont}", sans-serif`;
-  input.style.font       = fStyle;
-  input.style.color      = color;
-  input.style.opacity    = opacity;
-  input.style.minWidth   = '120px';
-  input.style.height     = 'auto';
+  const fSpec = `${fontItalic ? 'italic' : 'normal'} ${fontBold ? 'bold' : 'normal'} ${Math.round(fontSize * zoom)}px "${selectedFont}", sans-serif`;
+  input.style.font    = fSpec;
+  input.style.opacity = opacity;
   input.value = '';
-  input.focus();
+
+  // rAF ensures the element is fully painted before focusing
+  requestAnimationFrame(() => { input.focus(); input.select(); });
 }
 
 document.getElementById('textInput').addEventListener('keydown', e => {
+  e.stopPropagation(); // don't let tool shortcuts fire while typing
   if (e.key === 'Escape') { closeTextOverlay(); return; }
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitText(); }
 });
 document.getElementById('textInput').addEventListener('blur', () => {
   setTimeout(() => {
-    const overlay = document.getElementById('textOverlay');
-    if (overlay.style.display !== 'none' && !overlay._committing) commitText();
-  }, 150);
+    if (document.getElementById('textOverlay').style.display !== 'none') commitText();
+  }, 200);
 });
 
 function commitText() {
   const overlay = document.getElementById('textOverlay');
-  if (overlay._committing) return;
-  overlay._committing = true;
+  if (overlay.style.display === 'none') return; // already closed
   const input = document.getElementById('textInput');
   const txt = input.value.trim();
   closeTextOverlay();
-  overlay._committing = false;
   if (!txt) return;
   ctx.save();
   ctx.globalAlpha = opacity;
