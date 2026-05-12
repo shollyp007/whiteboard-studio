@@ -533,6 +533,11 @@
 
   <!-- LEFT TOOLS -->
   <div id="leftpanel">
+    <button class="tool-btn" data-tool="pick" onclick="selectTool('pick')">
+      <svg viewBox="0 0 24 24" style="fill:currentColor;stroke:none"><path d="M5 3l14 9-7 1-4 7z"/></svg>
+      <span class="tool-label">Pick / Move (V)</span>
+    </button>
+    <div class="tool-sep"></div>
     <button class="tool-btn active" data-tool="pen" onclick="selectTool('pen')">
       <svg viewBox="0 0 24 24"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
       <span class="tool-label">Pen</span>
@@ -800,6 +805,7 @@ function updateCanvasTransform() {
 
 // ── TOOLS ──
 function selectTool(t) {
+  if (tool === 'pick' && t !== 'pick' && sel) stampSelection();
   tool = t;
   document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active','rainbow-active'));
   const btn = document.querySelector(`[data-tool="${t}"]`);
@@ -807,7 +813,7 @@ function selectTool(t) {
     btn.classList.add('active');
     if (t === 'rainbow') btn.classList.add('rainbow-active');
   }
-  canvas.style.cursor = t === 'eraser' ? 'cell' : t === 'fill' ? 'copy' : t === 'text' ? 'text' : 'crosshair';
+  canvas.style.cursor = t === 'eraser' ? 'cell' : t === 'fill' ? 'copy' : t === 'text' ? 'text' : t === 'pick' ? 'default' : 'crosshair';
 }
 
 function selectBrush(b) {
@@ -830,6 +836,7 @@ function onDown(e) {
   startX = pos.x; startY = pos.y;
   lastX = pos.x; lastY = pos.y;
   points = [{x:pos.x,y:pos.y}];
+  if (tool === 'pick') { pickDown(pos); return; }
   if (tool === 'fill') { floodFill(Math.round(pos.x), Math.round(pos.y)); return; }
   if (tool === 'text') { addText(pos.x, pos.y); return; }
   isDrawing = true;
@@ -842,6 +849,7 @@ function onDown(e) {
 
 function onMove(e) {
   const pos = canvasPos(e);
+  if (tool === 'pick') { pickMove(pos, e); return; }
   drawCursor(e);
   if (!isDrawing) return;
   if (tool === 'fill' || tool === 'text') return;
@@ -860,6 +868,7 @@ function onMove(e) {
 }
 
 function onUp(e) {
+  if (tool === 'pick') { pickUp(e); return; }
   if (!isDrawing) return;
   isDrawing = false;
   if (['line','rect','circle','arrow'].includes(tool) && e) {
@@ -1616,6 +1625,249 @@ document.getElementById('projectsModal').addEventListener('click', function(e) {
   if (e.target === this) closeProjects();
 });
 
+// ── PICK / SELECT TOOL ──
+let selRect   = null;   // {x1,y1,x2,y2} while drawing marquee
+let sel       = null;   // {x,y,w,h,data,bgData,offscreen} — live floating selection
+let selDragging   = false;
+let selDragOffX   = 0, selDragOffY = 0;
+let selPhase      = 0;
+let selRafId      = null;
+let clipboard     = null; // {w,h,dataUrl}
+
+function pointInSel(px, py) {
+  return sel && px >= sel.x && px <= sel.x + sel.w && py >= sel.y && py <= sel.y + sel.h;
+}
+
+// ── Pick mouse handlers ──
+function pickDown(pos) {
+  if (sel && pointInSel(pos.x, pos.y)) {
+    selDragging  = true;
+    selDragOffX  = pos.x - sel.x;
+    selDragOffY  = pos.y - sel.y;
+    canvas.style.cursor = 'grabbing';
+  } else {
+    if (sel) stampSelection();
+    selRect = {x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y};
+  }
+}
+
+function pickMove(pos, e) {
+  if (selDragging && sel) {
+    sel.x = pos.x - selDragOffX;
+    sel.y = pos.y - selDragOffY;
+    canvas.style.cursor = 'grabbing';
+  } else if (selRect) {
+    selRect.x2 = pos.x; selRect.y2 = pos.y;
+    drawMarqueePreview();
+  } else {
+    canvas.style.cursor = sel && pointInSel(pos.x, pos.y) ? 'grab' : 'default';
+  }
+}
+
+function pickUp(e) {
+  if (selDragging) {
+    selDragging = false;
+    canvas.style.cursor = 'grab';
+    // Recapture background at new position for correct restore on next drag
+    const x = Math.round(sel.x), y = Math.round(sel.y);
+    const bgCanvas = document.createElement('canvas');
+    bgCanvas.width = sel.w; bgCanvas.height = sel.h;
+    const bgCtx = bgCanvas.getContext('2d');
+    bgCtx.fillStyle = bgColor;
+    bgCtx.fillRect(0, 0, sel.w, sel.h);
+    sel.bgData = bgCtx.getImageData(0, 0, sel.w, sel.h);
+  } else if (selRect) {
+    finalizeSelection();
+  }
+}
+
+// ── Marquee preview (before releasing mouse) ──
+function drawMarqueePreview() {
+  cursorCtx.clearRect(0, 0, cursorCanvas.width, cursorCanvas.height);
+  if (!selRect) return;
+  const canvasRect = canvas.getBoundingClientRect();
+  const areaRect   = document.getElementById('canvasArea').getBoundingClientRect();
+  const toScreen   = v => canvasRect.left - areaRect.left + v * zoom;
+  const toScreenY  = v => canvasRect.top  - areaRect.top  + v * zoom;
+  const sx = toScreen(Math.min(selRect.x1, selRect.x2));
+  const sy = toScreenY(Math.min(selRect.y1, selRect.y2));
+  const sw = Math.abs(selRect.x2 - selRect.x1) * zoom;
+  const sh = Math.abs(selRect.y2 - selRect.y1) * zoom;
+  cursorCtx.save();
+  cursorCtx.fillStyle = 'rgba(124,110,255,0.08)';
+  cursorCtx.fillRect(sx, sy, sw, sh);
+  cursorCtx.strokeStyle = 'rgba(124,110,255,0.9)';
+  cursorCtx.lineWidth = 1.5;
+  cursorCtx.setLineDash([5, 4]);
+  cursorCtx.strokeRect(sx, sy, sw, sh);
+  cursorCtx.setLineDash([]);
+  cursorCtx.restore();
+}
+
+// ── Finalize marquee into floating selection ──
+function finalizeSelection() {
+  if (!selRect) return;
+  const x = Math.round(Math.min(selRect.x1, selRect.x2));
+  const y = Math.round(Math.min(selRect.y1, selRect.y2));
+  const w = Math.round(Math.abs(selRect.x2 - selRect.x1));
+  const h = Math.round(Math.abs(selRect.y2 - selRect.y1));
+  selRect = null;
+  if (w < 2 || h < 2) { cursorCtx.clearRect(0,0,cursorCanvas.width,cursorCanvas.height); return; }
+
+  const data = ctx.getImageData(x, y, w, h);
+
+  const bgCanvas = document.createElement('canvas');
+  bgCanvas.width = w; bgCanvas.height = h;
+  const bgCtx = bgCanvas.getContext('2d');
+  bgCtx.fillStyle = bgColor;
+  bgCtx.fillRect(0, 0, w, h);
+  const bgData = bgCtx.getImageData(0, 0, w, h);
+
+  const offscreen = document.createElement('canvas');
+  offscreen.width = w; offscreen.height = h;
+  offscreen.getContext('2d').putImageData(data, 0, 0);
+
+  // Erase from canvas (replace with background)
+  ctx.putImageData(bgData, x, y);
+  saveHistory();
+
+  sel = {x, y, w, h, data, bgData, offscreen};
+  startMarchingAnts();
+  canvas.style.cursor = 'grab';
+  toast('Drag to move · Ctrl+C to copy · Delete to delete · click outside to stamp');
+}
+
+// ── Stamp floating selection onto canvas ──
+function stampSelection(doSave = true) {
+  if (!sel) return;
+  ctx.putImageData(sel.data, Math.round(sel.x), Math.round(sel.y));
+  sel = null; selRect = null;
+  stopMarchingAnts();
+  cursorCtx.clearRect(0, 0, cursorCanvas.width, cursorCanvas.height);
+  canvas.style.cursor = 'default';
+  if (doSave) saveHistory();
+}
+
+function deleteSelection() {
+  if (!sel) return;
+  sel = null; selRect = null;
+  stopMarchingAnts();
+  cursorCtx.clearRect(0, 0, cursorCanvas.width, cursorCanvas.height);
+  saveHistory();
+  toast('Deleted');
+}
+
+// ── Marching ants rAF loop ──
+function startMarchingAnts() {
+  stopMarchingAnts();
+  (function loop() {
+    selPhase = (selPhase + 0.45) % 12;
+    drawSelectionOverlay();
+    selRafId = requestAnimationFrame(loop);
+  })();
+}
+
+function stopMarchingAnts() {
+  if (selRafId) { cancelAnimationFrame(selRafId); selRafId = null; }
+}
+
+function drawSelectionOverlay() {
+  cursorCtx.clearRect(0, 0, cursorCanvas.width, cursorCanvas.height);
+  if (!sel) return;
+  const canvasRect = canvas.getBoundingClientRect();
+  const areaRect   = document.getElementById('canvasArea').getBoundingClientRect();
+  const sx = canvasRect.left - areaRect.left + sel.x * zoom;
+  const sy = canvasRect.top  - areaRect.top  + sel.y * zoom;
+  const sw = sel.w * zoom;
+  const sh = sel.h * zoom;
+
+  // Draw floating selection image
+  cursorCtx.globalAlpha = 0.92;
+  cursorCtx.drawImage(sel.offscreen, sx, sy, sw, sh);
+  cursorCtx.globalAlpha = 1;
+
+  // Black dashes
+  cursorCtx.save();
+  cursorCtx.lineWidth = 1.5;
+  cursorCtx.setLineDash([6, 4]);
+  cursorCtx.strokeStyle = 'rgba(0,0,0,0.85)';
+  cursorCtx.lineDashOffset = -selPhase;
+  cursorCtx.strokeRect(sx + 0.5, sy + 0.5, sw, sh);
+  // White dashes offset by 6
+  cursorCtx.strokeStyle = 'rgba(255,255,255,0.9)';
+  cursorCtx.lineDashOffset = -selPhase + 6;
+  cursorCtx.strokeRect(sx + 0.5, sy + 0.5, sw, sh);
+  cursorCtx.setLineDash([]);
+
+  // Coords hint while dragging
+  if (selDragging) {
+    const label = `${Math.round(sel.x)}, ${Math.round(sel.y)}`;
+    cursorCtx.font = '11px -apple-system, sans-serif';
+    cursorCtx.fillStyle = 'rgba(255,255,255,0.85)';
+    cursorCtx.fillText(label, sx + 4, sy - 5);
+  }
+  cursorCtx.restore();
+}
+
+// ── Copy / Paste ──
+function copySelection() {
+  if (!sel) { toast('Select something first'); return; }
+  const dataUrl = sel.offscreen.toDataURL('image/webp', 0.9);
+  clipboard = {w: sel.w, h: sel.h, dataUrl};
+  try { localStorage.setItem('ws_clipboard', JSON.stringify(clipboard)); } catch(e) {}
+  toast('Copied!');
+}
+
+function pasteClipboard() {
+  let cb = clipboard;
+  if (!cb) {
+    try { const raw = localStorage.getItem('ws_clipboard'); if (raw) cb = JSON.parse(raw); } catch(e) {}
+  }
+  if (!cb) { toast('Nothing to paste'); return; }
+  if (sel) stampSelection(false);
+
+  const img = new Image();
+  img.onload = () => {
+    const w = Math.min(cb.w, canvas.width);
+    const h = Math.min(cb.h, canvas.height);
+    const x = Math.round((canvas.width  - w) / 2);
+    const y = Math.round((canvas.height - h) / 2);
+
+    const offscreen = document.createElement('canvas');
+    offscreen.width = w; offscreen.height = h;
+    offscreen.getContext('2d').drawImage(img, 0, 0, w, h);
+    const data = offscreen.getContext('2d').getImageData(0, 0, w, h);
+
+    // Capture existing pixels at paste location as bgData
+    const bgData = ctx.getImageData(x, y, w, h);
+
+    sel = {x, y, w, h, data, bgData, offscreen};
+    selectTool('pick');
+    startMarchingAnts();
+    toast('Pasted — drag to position, click outside to stamp');
+  };
+  img.src = cb.dataUrl;
+}
+
+// Select all (Ctrl+A)
+function selectAll() {
+  if (sel) stampSelection(false);
+  selectTool('pick');
+  const w = canvas.width, h = canvas.height;
+  const data = ctx.getImageData(0, 0, w, h);
+  const offscreen = document.createElement('canvas');
+  offscreen.width = w; offscreen.height = h;
+  offscreen.getContext('2d').putImageData(data, 0, 0);
+  const bgCanvas = document.createElement('canvas');
+  bgCanvas.width = w; bgCanvas.height = h;
+  const bgCtx = bgCanvas.getContext('2d');
+  bgCtx.fillStyle = bgColor; bgCtx.fillRect(0, 0, w, h);
+  ctx.putImageData(bgCtx.getImageData(0, 0, w, h), 0, 0);
+  saveHistory();
+  sel = {x: 0, y: 0, w, h, data, bgData: bgCtx.getImageData(0,0,w,h), offscreen};
+  startMarchingAnts();
+}
+
 // ── DARK/LIGHT MODE ──
 let isDark = true;
 function toggleMode() {
@@ -1626,15 +1878,26 @@ function toggleMode() {
 
 // ── KEYBOARD ──
 document.addEventListener('keydown', e => {
+  const inText = document.activeElement === document.getElementById('textInput')
+              || document.activeElement.tagName === 'INPUT'
+              || document.activeElement.tagName === 'TEXTAREA';
+  if (inText) return;
+
   if (e.ctrlKey || e.metaKey) {
     if (e.key==='z') { e.preventDefault(); if(e.shiftKey) redo(); else undo(); }
     if (e.key==='y') { e.preventDefault(); redo(); }
     if (e.key==='s') { e.preventDefault(); saveCanvas(); }
+    if (e.key==='c') { e.preventDefault(); copySelection(); }
+    if (e.key==='v') { e.preventDefault(); pasteClipboard(); }
+    if (e.key==='a') { e.preventDefault(); selectAll(); }
+    return;
   }
-  const map = {'p':'pen','m':'marker','b':'brush','e':'eraser','r':'rainbow','l':'line','c':'circle','t':'text','f':'fill'};
-  if (!e.ctrlKey && !e.metaKey && map[e.key]) selectTool(map[e.key]);
+  const map = {'v':'pick','p':'pen','m':'marker','b':'brush','e':'eraser','r':'rainbow','l':'line','c':'circle','t':'text','f':'fill'};
+  if (map[e.key]) selectTool(map[e.key]);
   if (e.key===']') updateSize(Math.min(80, size+2));
   if (e.key==='[') updateSize(Math.max(1, size-2));
+  if ((e.key==='Delete'||e.key==='Backspace') && tool==='pick') { e.preventDefault(); deleteSelection(); }
+  if (e.key==='Escape' && tool==='pick' && sel) stampSelection();
 });
 
 // ── TOAST ──
