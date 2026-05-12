@@ -1,0 +1,27 @@
+{
+  "name": "Whiteboard Studio",
+  "short_name": "Whiteboard",
+  "description": "A beautiful full-featured drawing and whiteboard app with system fonts, pressure-sensitive stylus support, and named project saves.",
+  "start_url": "./whiteboard.html",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f0f13",
+  "theme_color": "#7c6eff",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "utilities"],
+  "shortcuts": [
+    {
+      "name": "New Canvas",
+      "short_name": "New",
+      "description": "Start a fresh whiteboard canvas",
+      "url": "./whiteboard.html"
+    }
+  ]
+}

@@ -4,6 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Whiteboard Studio</title>
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#7c6eff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Whiteboard">
+  <link rel="apple-touch-icon" href="icon.svg">
   <style>
     :root {
       --bg: #0f0f13;
@@ -459,6 +466,27 @@
     .save-card-btn.del:hover { background: #ff4d4d; border-color: #ff4d4d; color: #fff; }
     .no-saves { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 14px; }
 
+    /* ── TABLET / STYLUS INDICATOR ── */
+    #tabletBadge {
+      position: absolute; bottom: 14px; right: 14px;
+      background: var(--surface); border: 1px solid var(--border);
+      backdrop-filter: blur(10px);
+      padding: 5px 12px; border-radius: 20px; font-size: 11px;
+      color: var(--text-muted); z-index: 8; pointer-events: none;
+      opacity: 0; transition: opacity .4s;
+      display: flex; align-items: center; gap: 5px;
+    }
+    #tabletBadge.show { opacity: 1; }
+    #pressureBar {
+      width: 40px; height: 4px; border-radius: 2px;
+      background: var(--border); overflow: hidden;
+    }
+    #pressureFill {
+      height: 100%; border-radius: 2px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      transition: width .05s;
+    }
+
     /* ── AUTOSAVE INDICATOR ── */
     #autosaveBadge {
       position: absolute; bottom: 14px; left: 14px;
@@ -601,6 +629,11 @@
     <canvas id="mainCanvas"></canvas>
     <canvas id="cursorCanvas"></canvas>
     <div id="autosaveBadge">✓ Auto-saved</div>
+    <div id="tabletBadge">
+      <span id="tabletIcon">✏️</span>
+      <span id="tabletLabel">Stylus</span>
+      <div id="pressureBar"><div id="pressureFill" style="width:50%"></div></div>
+    </div>
   </div>
 
   <!-- RIGHT PANEL -->
@@ -802,11 +835,9 @@ function fillBackground() {
 // ── CANVAS POSITION HELPERS ──
 function canvasPos(e) {
   const rect = canvas.getBoundingClientRect();
-  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
   return {
-    x: (clientX - rect.left) / zoom,
-    y: (clientY - rect.top) / zoom
+    x: (e.clientX - rect.left) / zoom,
+    y: (e.clientY - rect.top)  / zoom,
   };
 }
 
@@ -833,20 +864,24 @@ function selectBrush(b) {
   document.querySelector(`[data-brush="${b}"]`).classList.add('active');
 }
 
-// ── DRAW EVENTS ──
-canvas.addEventListener('mousedown', onDown);
-canvas.addEventListener('mousemove', onMove);
-canvas.addEventListener('mouseup', onUp);
-canvas.addEventListener('mouseleave', onUp);
-canvas.addEventListener('touchstart', e => { e.preventDefault(); onDown(e); }, {passive:false});
-canvas.addEventListener('touchmove', e => { e.preventDefault(); onMove(e); }, {passive:false});
-canvas.addEventListener('touchend', e => { e.preventDefault(); onUp(e); }, {passive:false});
+// ── DRAW EVENTS — Pointer Events API (handles mouse, touch, and stylus) ──
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  canvas.setPointerCapture(e.pointerId); // keep events firing even outside canvas
+  onDown(e);
+});
+canvas.addEventListener('pointermove', onMove);
+canvas.addEventListener('pointerup',     onUp);
+canvas.addEventListener('pointerleave',  onUp);
+canvas.addEventListener('pointercancel', onUp);
 
 function onDown(e) {
   const pos = canvasPos(e);
   startX = pos.x; startY = pos.y;
   lastX = pos.x; lastY = pos.y;
   points = [{x:pos.x,y:pos.y}];
+  pressure = getStylusPressure(e, true);
+  updateTabletBadge(e);
   if (tool === 'pick') { pickDown(pos); return; }
   if (tool === 'fill') { floodFill(Math.round(pos.x), Math.round(pos.y)); return; }
   if (tool === 'text') { addText(pos.x, pos.y); return; }
@@ -872,8 +907,8 @@ function onMove(e) {
   }
   points.push({x:pos.x, y:pos.y});
   const dx = pos.x - lastX, dy = pos.y - lastY;
-  const speed = Math.sqrt(dx*dx + dy*dy);
-  pressure = Math.max(0.3, Math.min(1, 1 - speed/60));
+  pressure = getStylusPressure(e, false, dx, dy);
+  updateTabletBadge(e);
   drawStroke(lastX, lastY, pos.x, pos.y);
   lastX = pos.x; lastY = pos.y;
 }
@@ -1911,6 +1946,50 @@ document.addEventListener('keydown', e => {
   if (e.key==='Escape' && tool==='pick' && sel) stampSelection();
 });
 
+// ── STYLUS / TABLET SUPPORT ──
+let lastPointerType = 'mouse';
+
+function getStylusPressure(e, isDown = false, dx = 0, dy = 0) {
+  const type = e.pointerType || 'mouse';
+  if (type === 'pen') {
+    // Real hardware pressure from the stylus (0.0 – 1.0)
+    return Math.max(0.05, e.pressure ?? 0.5);
+  }
+  if (isDown) return 1;
+  // Mouse / touch: simulate pressure from drawing speed
+  const speed = Math.sqrt(dx * dx + dy * dy);
+  return Math.max(0.3, Math.min(1, 1 - speed / 60));
+}
+
+function updateTabletBadge(e) {
+  const type = e.pointerType || 'mouse';
+  if (type === lastPointerType && type !== 'pen') return;
+  lastPointerType = type;
+  const badge = document.getElementById('tabletBadge');
+  if (type === 'pen') {
+    const pct = Math.round((e.pressure ?? 0.5) * 100);
+    document.getElementById('tabletIcon').textContent  = '✏️';
+    document.getElementById('tabletLabel').textContent = 'Stylus';
+    document.getElementById('pressureFill').style.width = pct + '%';
+    badge.classList.add('show');
+  } else if (type === 'touch') {
+    document.getElementById('tabletIcon').textContent  = '👆';
+    document.getElementById('tabletLabel').textContent = 'Touch';
+    document.getElementById('pressureFill').style.width = '50%';
+    badge.classList.add('show');
+  } else {
+    badge.classList.remove('show');
+  }
+}
+
+// Keep pressure bar live while drawing with stylus
+canvas.addEventListener('pointermove', e => {
+  if (e.pointerType === 'pen' && e.buttons) {
+    const pct = Math.round((e.pressure ?? 0.5) * 100);
+    document.getElementById('pressureFill').style.width = pct + '%';
+  }
+});
+
 // ── TOOLTIP ──
 const TOOL_TIPS = {
   pick:    'Pick & Move — drag to select any region, then drag it to a new position. Ctrl+C to copy, Ctrl+V to paste, Delete to remove [V]',
@@ -1966,6 +2045,34 @@ function toast(msg) {
   clearTimeout(el._t);
   el._t = setTimeout(() => el.classList.remove('show'), 2000);
 }
+
+// ── PWA: SERVICE WORKER + INSTALL PROMPT ──
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
+
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  // Show an install button in the topbar
+  const btn = document.createElement('button');
+  btn.className = 'tb-btn';
+  btn.id = 'installBtn';
+  btn.dataset.tip = 'Install Whiteboard Studio as a desktop app — works offline too';
+  btn.innerHTML = '⬇️ Install App';
+  btn.onclick = async () => {
+    deferredInstallPrompt.prompt();
+    const { outcome } = await deferredInstallPrompt.userChoice;
+    if (outcome === 'accepted') btn.remove();
+    deferredInstallPrompt = null;
+  };
+  document.getElementById('topbar').insertBefore(btn, document.getElementById('modeBtn'));
+});
+window.addEventListener('appinstalled', () => {
+  document.getElementById('installBtn')?.remove();
+  toast('App installed! You can now launch it from your desktop.');
+});
 
 init();
 </script>

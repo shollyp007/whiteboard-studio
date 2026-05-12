@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7c6eff"/>
+      <stop offset="100%" stop-color="#ff6eb4"/>
+    </linearGradient>
+  </defs>
+  <!-- Dark rounded background -->
+  <rect width="512" height="512" rx="100" fill="#0f0f13"/>
+  <!-- White canvas -->
+  <rect x="72" y="88" width="368" height="272" rx="22" fill="white" opacity="0.96"/>
+  <!-- Colorful brush stroke -->
+  <path d="M 120 290 Q 180 160 270 200 Q 340 230 380 170"
+        fill="none" stroke="url(#grad)" stroke-width="26"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Pen nib -->
+  <polygon points="388,158 416,130 432,148 404,176" fill="#7c6eff"/>
+  <polygon points="376,170 388,158 404,176 380,192" fill="rgba(255,255,255,0.35)"/>
+  <!-- ✦ sparkle bottom-right -->
+  <text x="390" y="360" font-size="96" fill="url(#grad)" text-anchor="middle" font-family="serif">✦</text>
+</svg>
