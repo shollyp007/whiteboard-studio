@@ -379,6 +379,79 @@
       margin-top: 4px; text-align: center;
     }
 
+    /* ── PROJECTS MODAL ── */
+    #projectsModal {
+      display: none; position: fixed; inset: 0; z-index: 200;
+      background: rgba(0,0,0,0.6); backdrop-filter: blur(6px);
+      align-items: center; justify-content: center;
+    }
+    #projectsModal.open { display: flex; }
+    .modal-box {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 20px; width: min(680px, 95vw); max-height: 85vh;
+      display: flex; flex-direction: column;
+      box-shadow: 0 32px 80px rgba(0,0,0,0.6);
+      overflow: hidden;
+    }
+    .modal-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 18px 20px 14px; border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .modal-header h2 { font-size: 16px; font-weight: 700; flex: 1; }
+    .modal-header .modal-close {
+      width: 30px; height: 30px; border-radius: 50%;
+      border: 1.5px solid var(--border); background: var(--surface);
+      color: var(--text-muted); font-size: 16px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s;
+    }
+    .modal-header .modal-close:hover { background: var(--surface-hover); color: var(--text); }
+
+    .modal-actions {
+      padding: 12px 20px; border-bottom: 1px solid var(--border);
+      display: flex; gap: 10px; flex-shrink: 0; flex-wrap: wrap;
+    }
+
+    .modal-body { padding: 16px 20px; overflow-y: auto; flex: 1; }
+
+    .saves-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 14px;
+    }
+    .save-card {
+      border: 1.5px solid var(--border); border-radius: 14px;
+      overflow: hidden; cursor: pointer;
+      transition: border-color .18s, transform .15s, box-shadow .18s;
+      background: var(--surface);
+    }
+    .save-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+    .save-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; background: #fff; }
+    .save-card-info { padding: 8px 10px; }
+    .save-card-name { font-size: 13px; font-weight: 600; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .save-card-date { font-size: 10px; color: var(--text-muted); }
+    .save-card-actions { display: flex; gap: 6px; margin-top: 6px; }
+    .save-card-btn {
+      flex: 1; padding: 5px; border-radius: 7px; border: 1px solid var(--border);
+      background: var(--surface-hover); color: var(--text-muted);
+      font-size: 11px; cursor: pointer; text-align: center;
+      transition: all .15s;
+    }
+    .save-card-btn:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .save-card-btn.del:hover { background: #ff4d4d; border-color: #ff4d4d; color: #fff; }
+    .no-saves { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 14px; }
+
+    /* ── AUTOSAVE INDICATOR ── */
+    #autosaveBadge {
+      position: absolute; bottom: 14px; left: 14px;
+      background: var(--surface); border: 1px solid var(--border);
+      backdrop-filter: blur(10px);
+      padding: 5px 12px; border-radius: 20px; font-size: 11px;
+      color: var(--text-muted); z-index: 8; pointer-events: none;
+      opacity: 0; transition: opacity .4s;
+    }
+    #autosaveBadge.show { opacity: 1; }
+
     /* Rainbow animation for active rainbow brush */
     @keyframes rainbow-shift {
       0%   { filter: hue-rotate(0deg); }
@@ -413,7 +486,37 @@
   <button class="tb-btn accent" onclick="saveCanvas()">
     <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Save
   </button>
+  <button class="tb-btn" onclick="openProjects()">
+    <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg> Projects
+  </button>
   <button class="tb-btn" onclick="toggleMode()" id="modeBtn">🌙 Dark</button>
+</div>
+
+<!-- PROJECTS MODAL -->
+<div id="projectsModal" onclick="e => { if(e.target===this) closeProjects(); }">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2>💾 Projects</h2>
+      <span id="autosaveStatus" style="font-size:11px;color:var(--text-muted)"></span>
+      <button class="modal-close" onclick="closeProjects()">✕</button>
+    </div>
+    <div class="modal-actions">
+      <button class="tb-btn accent" onclick="saveToSlot()">
+        <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Save Current Canvas
+      </button>
+      <button class="tb-btn" onclick="newCanvas()">
+        <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New Canvas
+      </button>
+      <button class="tb-btn" onclick="clearAllSaves()" style="margin-left:auto;color:#ff4d4d">
+        Clear All
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="saves-grid" id="savesGrid"></div>
+    </div>
+  </div>
 </div>
 
 <!-- WORKSPACE -->
@@ -475,6 +578,7 @@
     <canvas id="mainCanvas"></canvas>
     <canvas id="cursorCanvas"></canvas>
     <div id="zoomBadge">100%</div>
+    <div id="autosaveBadge">✓ Auto-saved</div>
     <!-- In-canvas text editor -->
     <div id="textOverlay">
       <textarea id="textInput" rows="1" placeholder="Type here…"></textarea>
@@ -640,6 +744,7 @@ function init() {
   updateFontPreview();
   saveHistory();
   setupCursorCanvas();
+  restoreAutoSave();
   window.addEventListener('resize', () => { setupCursorCanvas(); });
 }
 
@@ -1235,6 +1340,7 @@ function saveHistory() {
   history.push(ctx.getImageData(0,0,canvas.width,canvas.height));
   if (history.length > 60) history.shift();
   redoStack = [];
+  scheduleAutoSave();
 }
 
 function undo() {
@@ -1305,6 +1411,198 @@ function saveCanvas() {
   link.click();
   toast('Saved as PNG!');
 }
+
+// ── AUTO-SAVE ──
+let autoSaveTimer = null;
+
+function scheduleAutoSave() {
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(doAutoSave, 1500);
+}
+
+function doAutoSave() {
+  try {
+    const dataUrl = canvas.toDataURL('image/webp', 0.82);
+    localStorage.setItem('ws_autosave', JSON.stringify({
+      dataUrl, bgColor,
+      canvasTitle: document.getElementById('canvasTitle').textContent,
+      date: new Date().toISOString()
+    }));
+    showAutosaveBadge();
+  } catch(e) {
+    if (e.name === 'QuotaExceededError') toast('Storage full — please delete some saved projects');
+  }
+}
+
+function showAutosaveBadge() {
+  const b = document.getElementById('autosaveBadge');
+  b.classList.add('show');
+  clearTimeout(b._t);
+  b._t = setTimeout(() => b.classList.remove('show'), 2000);
+}
+
+function restoreAutoSave() {
+  try {
+    const raw = localStorage.getItem('ws_autosave');
+    if (!raw) return;
+    const {dataUrl, bgColor: savedBg, canvasTitle} = JSON.parse(raw);
+    if (savedBg) { bgColor = savedBg; document.getElementById('bgColorPicker').value = savedBg; }
+    if (canvasTitle) document.getElementById('canvasTitle').textContent = canvasTitle;
+    const img = new Image();
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      saveHistory();
+      toast('Restored last session');
+    };
+    img.src = dataUrl;
+  } catch(e) {}
+}
+
+// ── PROJECTS (NAMED SAVE SLOTS) ──
+function getSaves() {
+  try { return JSON.parse(localStorage.getItem('ws_saves') || '[]'); } catch(e) { return []; }
+}
+
+function makeThumbnail() {
+  const thumb = document.createElement('canvas');
+  thumb.width = 320; thumb.height = Math.round(320 * canvas.height / canvas.width);
+  thumb.getContext('2d').drawImage(canvas, 0, 0, thumb.width, thumb.height);
+  return thumb.toDataURL('image/webp', 0.7);
+}
+
+function saveToSlot(existingName) {
+  const name = existingName || prompt('Name this canvas:', document.getElementById('canvasTitle').textContent || 'Untitled');
+  if (!name) return;
+  const saves = getSaves();
+  const dataUrl = canvas.toDataURL('image/webp', 0.85);
+  const thumb   = makeThumbnail();
+  const entry = { id: Date.now(), name, date: new Date().toISOString(), dataUrl, thumb, bgColor };
+  const idx = saves.findIndex(s => s.name === name);
+  if (idx >= 0) saves[idx] = entry; else saves.unshift(entry);
+  try {
+    localStorage.setItem('ws_saves', JSON.stringify(saves.slice(0, 30)));
+    document.getElementById('canvasTitle').textContent = name;
+    renderSavesGrid();
+    toast(`Saved: ${name}`);
+  } catch(e) {
+    if (e.name === 'QuotaExceededError') toast('Storage full — delete some projects first');
+  }
+}
+
+function loadSlot(id) {
+  const saves = getSaves();
+  const entry = saves.find(s => s.id === id);
+  if (!entry) return;
+  if (!confirm(`Load "${entry.name}"? Unsaved changes will be lost.`)) return;
+  bgColor = entry.bgColor || '#ffffff';
+  document.getElementById('bgColorPicker').value = bgColor;
+  document.getElementById('canvasTitle').textContent = entry.name;
+  const img = new Image();
+  img.onload = () => {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    saveHistory();
+    closeProjects();
+    toast(`Loaded: ${entry.name}`);
+  };
+  img.src = entry.dataUrl;
+}
+
+function deleteSlot(id) {
+  const saves = getSaves().filter(s => s.id !== id);
+  localStorage.setItem('ws_saves', JSON.stringify(saves));
+  renderSavesGrid();
+}
+
+function clearAllSaves() {
+  if (!confirm('Delete ALL saved projects? This cannot be undone.')) return;
+  localStorage.removeItem('ws_saves');
+  localStorage.removeItem('ws_autosave');
+  renderSavesGrid();
+  toast('All saves cleared');
+}
+
+function newCanvas() {
+  if (!confirm('Start a new canvas? Unsaved changes will be lost.')) return;
+  bgColor = '#ffffff';
+  document.getElementById('bgColorPicker').value = '#ffffff';
+  document.getElementById('canvasTitle').textContent = 'Untitled Canvas';
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  fillBackground();
+  history = []; redoStack = [];
+  saveHistory();
+  closeProjects();
+  toast('New canvas');
+}
+
+function renderSavesGrid() {
+  const saves = getSaves();
+  const grid = document.getElementById('savesGrid');
+  if (!saves.length) {
+    grid.innerHTML = '<div class="no-saves">No saved projects yet.<br>Click <b>Save Current Canvas</b> to get started.</div>';
+    return;
+  }
+  grid.innerHTML = '';
+  saves.forEach(s => {
+    const card = document.createElement('div');
+    card.className = 'save-card';
+    const d = new Date(s.date);
+    const dateStr = d.toLocaleDateString(undefined, {month:'short',day:'numeric',year:'numeric'}) + ' ' + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+    card.innerHTML = `
+      <img src="${s.thumb}" alt="${s.name}" onclick="loadSlot(${s.id})">
+      <div class="save-card-info">
+        <div class="save-card-name" title="${s.name}">${s.name}</div>
+        <div class="save-card-date">${dateStr}</div>
+        <div class="save-card-actions">
+          <div class="save-card-btn" onclick="loadSlot(${s.id})">Open</div>
+          <div class="save-card-btn" onclick="exportSlot(${s.id})">PNG</div>
+          <div class="save-card-btn del" onclick="deleteSlot(${s.id})">Delete</div>
+        </div>
+      </div>`;
+    grid.appendChild(card);
+  });
+}
+
+function exportSlot(id) {
+  const saves = getSaves();
+  const entry = saves.find(s => s.id === id);
+  if (!entry) return;
+  const link = document.createElement('a');
+  link.download = entry.name.replace(/[^a-z0-9]/gi,'_') + '.png';
+  // convert webp dataUrl to png via offscreen canvas
+  const img = new Image();
+  img.onload = () => {
+    const oc = document.createElement('canvas');
+    oc.width = canvas.width; oc.height = canvas.height;
+    oc.getContext('2d').drawImage(img, 0, 0, oc.width, oc.height);
+    link.href = oc.toDataURL('image/png');
+    link.click();
+  };
+  img.src = entry.dataUrl;
+}
+
+function openProjects() {
+  renderSavesGrid();
+  const raw = localStorage.getItem('ws_autosave');
+  if (raw) {
+    try {
+      const {date} = JSON.parse(raw);
+      const d = new Date(date);
+      document.getElementById('autosaveStatus').textContent =
+        'Auto-saved ' + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+    } catch(e) {}
+  }
+  document.getElementById('projectsModal').classList.add('open');
+}
+
+function closeProjects() {
+  document.getElementById('projectsModal').classList.remove('open');
+}
+
+// close modal on backdrop click
+document.getElementById('projectsModal').addEventListener('click', function(e) {
+  if (e.target === this) closeProjects();
+});
 
 // ── DARK/LIGHT MODE ──
 let isDark = true;
