@@ -84,6 +84,13 @@
     .tb-btn svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
     .spacer { flex: 1; }
     #canvasTitle { font-size:14px; color:var(--text-muted); font-weight:500; }
+    #modifiedDot {
+      display: inline-block; width: 7px; height: 7px;
+      border-radius: 50%; background: var(--accent2);
+      margin-left: 5px; vertical-align: middle;
+      opacity: 0; transition: opacity .2s;
+    }
+    #modifiedDot.show { opacity: 1; }
 
     /* ── LAYOUT ── */
     #workspace {
@@ -514,7 +521,7 @@
 <!-- TOP BAR -->
 <div id="topbar">
   <span class="logo">✦ Whiteboard Studio</span>
-  <span id="canvasTitle">Untitled Canvas</span>
+  <span id="canvasTitle">Untitled Canvas</span><span id="modifiedDot" title="Unsaved changes"></span>
   <div class="spacer"></div>
 
   <button class="tb-btn" onclick="undo()" data-tip="Undo the last action [Ctrl+Z]">
@@ -529,8 +536,14 @@
   <button class="tb-btn" onclick="importImage()" data-tip="Import a photo or image as a semi-transparent tracing layer">
     <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> Import
   </button>
-  <button class="tb-btn accent" onclick="saveCanvas()" data-tip="Export the canvas as a PNG image file [Ctrl+S]">
-    <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Save
+  <button class="tb-btn accent" onclick="saveWbs()" data-tip="Save as .wbs file — preserves full canvas for reopening and editing [Ctrl+S]">
+    <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save
+  </button>
+  <button class="tb-btn" onclick="openWbs()" data-tip="Open a .wbs file from your computer">
+    <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> Open
+  </button>
+  <button class="tb-btn" onclick="saveCanvas()" data-tip="Export a flat PNG image (no longer editable as .wbs)">
+    <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> PNG
   </button>
   <button class="tb-btn" onclick="openProjects()" data-tip="Open the Projects panel — save named canvases and reload them later">
     <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg> Projects
@@ -764,8 +777,9 @@
 <!-- Floating tooltip -->
 <div id="tooltip"></div>
 
-<!-- Hidden file input -->
-<input type="file" id="fileInput" accept="image/*" style="display:none" onchange="loadImage(event)">
+<!-- Hidden file inputs -->
+<input type="file" id="fileInput"    accept="image/*"    style="display:none" onchange="loadImage(event)">
+<input type="file" id="wbsFileInput" accept=".wbs"       style="display:none" onchange="loadWbsFromInput(event)">
 <div id="toast"></div>
 
 <script>
@@ -1407,6 +1421,7 @@ function saveHistory() {
   history.push(ctx.getImageData(0,0,canvas.width,canvas.height));
   if (history.length > 60) history.shift();
   redoStack = [];
+  markModified();
   scheduleAutoSave();
 }
 
@@ -1487,7 +1502,8 @@ function scheduleAutoSave() {
   autoSaveTimer = setTimeout(doAutoSave, 1500);
 }
 
-function doAutoSave() {
+async function doAutoSave() {
+  // Always backup to localStorage
   try {
     const dataUrl = canvas.toDataURL('image/webp', 0.82);
     localStorage.setItem('ws_autosave', JSON.stringify({
@@ -1495,9 +1511,24 @@ function doAutoSave() {
       canvasTitle: document.getElementById('canvasTitle').textContent,
       date: new Date().toISOString()
     }));
-    showAutosaveBadge();
   } catch(e) {
     if (e.name === 'QuotaExceededError') toast('Storage full — please delete some saved projects');
+  }
+
+  // If a .wbs file is open, auto-save to it silently
+  if (wbsFileHandle) {
+    try {
+      const blob = buildWbsBlob();
+      const writable = await wbsFileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      markSaved();
+      showAutosaveBadge();
+    } catch(e) {
+      wbsFileHandle = null; // handle lost (file moved/deleted)
+    }
+  } else {
+    showAutosaveBadge();
   }
 }
 
@@ -1932,7 +1963,7 @@ document.addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey) {
     if (e.key==='z') { e.preventDefault(); if(e.shiftKey) redo(); else undo(); }
     if (e.key==='y') { e.preventDefault(); redo(); }
-    if (e.key==='s') { e.preventDefault(); saveCanvas(); }
+    if (e.key==='s') { e.preventDefault(); e.shiftKey ? saveWbs(true) : saveWbs(); }
     if (e.key==='c') { e.preventDefault(); copySelection(); }
     if (e.key==='v') { e.preventDefault(); pasteClipboard(); }
     if (e.key==='a') { e.preventDefault(); selectAll(); }
@@ -1945,6 +1976,115 @@ document.addEventListener('keydown', e => {
   if ((e.key==='Delete'||e.key==='Backspace') && tool==='pick') { e.preventDefault(); deleteSelection(); }
   if (e.key==='Escape' && tool==='pick' && sel) stampSelection();
 });
+
+// ── .WBS FILE FORMAT ──
+let wbsFileHandle = null;
+let isModified    = false;
+
+function markModified() {
+  isModified = true;
+  document.getElementById('modifiedDot').classList.add('show');
+}
+function markSaved() {
+  isModified = false;
+  document.getElementById('modifiedDot').classList.remove('show');
+}
+
+function buildWbsBlob() {
+  const data = {
+    app:     'Whiteboard Studio',
+    version: '1.0',
+    title:   document.getElementById('canvasTitle').textContent.replace(' ●',''),
+    date:    new Date().toISOString(),
+    bgColor,
+    canvas:  canvas.toDataURL('image/webp', 0.92),
+  };
+  return new Blob([JSON.stringify(data)], {type: 'application/json'});
+}
+
+async function saveWbs(forceDialog = false) {
+  // Use File System Access API if available
+  if ('showSaveFilePicker' in window && (forceDialog || !wbsFileHandle)) {
+    try {
+      wbsFileHandle = await window.showSaveFilePicker({
+        suggestedName: (document.getElementById('canvasTitle').textContent.replace(' ●','') || 'drawing') + '.wbs',
+        types: [{ description: 'Whiteboard Studio File', accept: {'application/json': ['.wbs']} }],
+      });
+    } catch(e) {
+      if (e.name === 'AbortError') return;
+    }
+  }
+
+  if (wbsFileHandle) {
+    try {
+      const writable = await wbsFileHandle.createWritable();
+      await writable.write(buildWbsBlob());
+      await writable.close();
+      // Update title to filename without extension
+      const name = wbsFileHandle.name.replace(/\.wbs$/i, '');
+      document.getElementById('canvasTitle').textContent = name;
+      markSaved();
+      toast('Saved: ' + wbsFileHandle.name);
+    } catch(e) {
+      toast('Save failed: ' + e.message);
+    }
+  } else {
+    // Fallback: trigger a download
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(buildWbsBlob());
+    link.download = (document.getElementById('canvasTitle').textContent.replace(' ●','') || 'drawing') + '.wbs';
+    link.click();
+    URL.revokeObjectURL(link.href);
+    markSaved();
+    toast('Downloaded as .wbs — re-open this file to continue editing');
+  }
+}
+
+async function openWbs() {
+  if ('showOpenFilePicker' in window) {
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        types: [{ description: 'Whiteboard Studio File', accept: {'application/json': ['.wbs']} }],
+      });
+      wbsFileHandle = handle;
+      const file = await handle.getFile();
+      await loadWbsData(await file.text(), file.name);
+    } catch(e) {
+      if (e.name !== 'AbortError') toast('Could not open file: ' + e.message);
+    }
+  } else {
+    document.getElementById('wbsFileInput').click();
+  }
+}
+
+async function loadWbsFromInput(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  await loadWbsData(await file.text(), file.name);
+  e.target.value = '';
+}
+
+async function loadWbsData(text, filename) {
+  let data;
+  try { data = JSON.parse(text); } catch(e) { toast('Invalid .wbs file'); return; }
+  if (data.app !== 'Whiteboard Studio') { toast('Not a Whiteboard Studio file'); return; }
+
+  bgColor = data.bgColor || '#ffffff';
+  document.getElementById('bgColorPicker').value = bgColor;
+  document.getElementById('canvasTitle').textContent = data.title || filename.replace(/\.wbs$/i,'');
+
+  const img = new Image();
+  img.onload = () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    fillBackground();
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    history = []; redoStack = [];
+    saveHistory();
+    markSaved();
+    toast('Opened: ' + (data.title || filename));
+  };
+  img.src = data.canvas;
+}
 
 // ── STYLUS / TABLET SUPPORT ──
 let lastPointerType = 'mouse';
